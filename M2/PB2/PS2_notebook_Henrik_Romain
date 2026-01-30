@@ -1,0 +1,523 @@
+### A Pluto.jl notebook ###
+# v0.20.17
+
+using Markdown
+using InteractiveUtils
+
+# ╔═╡ 9ca89948-4a93-4247-8a6d-0becfc666ef6
+# package imports 
+using Distributions, LinearAlgebra
+
+# ╔═╡ 99182048-9fc2-11f0-100a-b737aac5eecc
+md"""
+# Problem Set 3 - Exercise 3
+"""
+
+# ╔═╡ 699493f0-b13c-4bfa-a0ac-78b5d49c157e
+md"""
+### Henrik Berger & Romain Fernex
+"""
+
+# ╔═╡ a0a07434-d36d-4a2a-bfe5-814d219c34b7
+md"""
+## Part A : Tauchen's method on process discretization
+"""
+
+# ╔═╡ 46f6fe97-ea95-49aa-b301-f49b91d9ad77
+md"""
+q1. As Krueger et al. (2015), discretize the process into a five state Markov chain using the Tauchen function from QuantEcon. 
+"""
+
+# ╔═╡ 783f9eca-dbf9-46ea-9be0-1e1197d52a52
+begin
+	# Tauchen discretization function
+	function tauchen(mean, sd, rho, num_states; q=3)
+	
+	    uncond_sd = sd/sqrt(1-rho^2)
+	    y = range(-q*uncond_sd, stop = q*uncond_sd, length = num_states)
+	    d = y[2]-y[1]
+	
+	    Pi = zeros(num_states,num_states)
+	
+	    for row = 1:num_states
+	      # end points
+	          Pi[row,1] = cdf(Normal(),(y[1] - rho*y[row] + d/2)/sd)
+	          Pi[row,num_states] = 1 - cdf(Normal(), (y[num_states] - rho*y[row] - d/2)/sd)
+	
+	      # middle columns
+	          for col = 2:num_states-1
+	              Pi[row, col] = (cdf(Normal(),(y[col] - rho*y[row] + d/2) / sd) -
+	                             cdf(Normal(),(y[col] - rho*y[row] - d/2) / sd))
+	          end
+	    end
+	
+	  yy = y .+ mean # center process around its mean
+	
+	  Pi = Pi./sum(Pi, dims = 2) # renormalize
+	
+	  return Pi, yy
+	end 
+end
+
+# ╔═╡ 9eb140a7-cd59-4efa-81af-b6fadb9008ad
+begin 
+	# parameter values 
+	rho = 0.8
+	sigma = sqrt(0.1225)
+	N = 5
+	N_iter = 2000;
+end
+
+# ╔═╡ 8e34a3da-40bc-4313-acae-e43d942d2fd8
+begin
+	TransMat,log_y_grid = tauchen( 0, sigma,  rho,  N)
+end 
+
+
+# ╔═╡ d3d2c187-f58f-4875-adad-49b5cc5e92fb
+md"""
+q2. What is the probability matrix? What are the possible values of income y? Hint: careful with the log of income!
+"""
+
+# ╔═╡ a836dd88-9945-49bd-a25e-c6322b115192
+begin 
+	y_grid = exp.(log_y_grid) # income value grid
+	#println(join(["Transition matrix : ",round.(TransMat,digits = 3)], ""))
+	println("Transition matrix : ")
+	display(round.(TransMat,digits = 3))
+	println(join(["Income values : ",round.(y_grid,digits = 3)], ""))
+end
+
+# ╔═╡ f59c70fb-dd81-40f4-8652-f81503994467
+md"""
+q3. Create a function to compute the stable distribution. It musts take as input an initial guess of the distribution (vector of N × 1) and the probability matrix (matrix of N × N ). The goal is to find the fixed point. The output should be the stable distribution (vector of N × 1).
+"""
+
+# ╔═╡ 3383286c-1b10-4f23-9f3e-006f336b64f6
+begin
+	## Create a function to get the stable distribution
+	function get_invdist(pi_old, delta, maxiter, TransMat)
+	   for iter in 1:N_iter
+	       pi_next = pi_old*TransMat
+	       error = maximum(abs.(pi_next .- pi_old))
+	       if error < delta 
+	           return pi_next
+	           break
+	       elseif iter == maxiter
+	           error("No solution found after $iter iterations")
+	       end
+	       pi_old = pi_next
+	   end
+	end
+end
+
+# ╔═╡ d9cf691d-7aa0-4144-8e91-6b2347b1f9ea
+begin
+	## exogenous parameters and initialization values 
+	p = 1/N
+	init = transpose(repeat([p],5))
+	delta = 1e-12
+	maxiter = 3000
+end
+
+# ╔═╡ 52b56cdf-91c1-431c-96cc-42d46e5ece2a
+begin 
+	## stable distribution
+	stable_dist = get_invdist(init, delta, maxiter, TransMat)
+	println(join(["Stable distribution : ",round.(stable_dist, digits = 3)], ""))
+end
+
+# ╔═╡ df36bb5e-563e-44cc-8eb3-f59ac19168b6
+md"""
+q4. What is the mean income? What is the share of the households with the highest income?
+"""
+
+# ╔═╡ c6612ac1-225e-4738-89b8-a47096a1165a
+begin
+	## mean income
+	mean_income = stable_dist*y_grid
+	println(join(["Mean income : ",round(mean_income,digits = 3)], ""))
+end
+
+# ╔═╡ 77a2304b-ceb1-4677-801b-abfb68444f1b
+begin
+	## share of household in top income bracket
+	share_top = stable_dist[N]
+	println(join(["Share of household in the top income bracket : ",round(share_top,digits = 3)], ""))
+end
+
+# ╔═╡ 44fc9661-54a4-4785-b891-7e2a42f6a552
+md"""
+## Part B : Recessions
+"""
+
+# ╔═╡ 944cc85a-ac26-433b-b9d6-600a1ffeca4d
+begin 
+	## parameters
+	P = [0.971 0.029 0.000 
+	    0.145 0.778 0.077
+	    0.000 0.508 0.492];
+	init_growth = transpose([1,0,0])
+end
+
+# ╔═╡ 432594f2-e8bb-4225-9c08-14a27b7b4678
+md"""
+q1. Assume we are at normal growth, what is the probability of going in recession (mild or severe) next month? In 6 months?
+"""
+
+# ╔═╡ cd15e79d-2c0e-4f92-9f96-f4d8c38e27a9
+begin
+	T1_growth = init_growth*P
+	T1_recession_prob = T1_growth[2]+T1_growth[3]
+	println(join(["Recession probability at t+1 : ",T1_recession_prob], ""))
+end
+
+# ╔═╡ 91d3f260-22f5-443e-afb4-bae3efd8fb68
+begin 
+	T6_growth = init_growth*P^6
+	T6_recession_prob = T6_growth[2]+T6_growth[3]
+	println(join(["Recession probability at t+6 : ",round(T6_recession_prob,digits = 3)], ""))
+end
+
+# ╔═╡ bbaedb5c-c598-42f7-b447-45c35efb0fb1
+md"""
+q2. Compute the stable distribution. What is the probability of being in a severe recession in the long run?
+"""
+
+# ╔═╡ 15e1a90f-a9a4-427c-9173-0410c93c8dbc
+begin
+	stable_growth = get_invdist(init_growth, delta, maxiter, P)
+	SS_SR_prob = stable_growth[length(stable_growth)]
+	println(join(["Stable distribution : ",round.(stable_growth,digits = 3)], ""))
+	println(join(["Probability of being in a severe recession in the long run : ",round(SS_SR_prob,digits = 3)], ""))
+end
+
+# ╔═╡ e0f3a725-9c01-4a1d-afe4-a86a35a1d567
+
+
+# ╔═╡ 00000000-0000-0000-0000-000000000001
+PLUTO_PROJECT_TOML_CONTENTS = """
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[compat]
+Distributions = "~0.25.120"
+"""
+
+# ╔═╡ 00000000-0000-0000-0000-000000000002
+PLUTO_MANIFEST_TOML_CONTENTS = """
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.0-rc1"
+manifest_format = "2.0"
+project_hash = "bccc5e927d465ee8a9c42a29780383b57fe80773"
+
+[[deps.AliasTables]]
+deps = ["PtrArrays", "Random"]
+git-tree-sha1 = "9876e1e164b144ca45e9e3198d0b689cadfed9ff"
+uuid = "66dad0bd-aa9a-41b7-9441-69ab47430ed8"
+version = "1.1.3"
+
+[[deps.Artifacts]]
+uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
+version = "1.11.0"
+
+[[deps.CompilerSupportLibraries_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+version = "1.3.0+1"
+
+[[deps.DataAPI]]
+git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
+uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
+version = "1.16.0"
+
+[[deps.DataStructures]]
+deps = ["OrderedCollections"]
+git-tree-sha1 = "6c72198e6a101cccdd4c9731d3985e904ba26037"
+uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+version = "0.19.1"
+
+[[deps.Dates]]
+deps = ["Printf"]
+uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
+version = "1.11.0"
+
+[[deps.Distributions]]
+deps = ["AliasTables", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsAPI", "StatsBase", "StatsFuns"]
+git-tree-sha1 = "3e6d038b77f22791b8e3472b7c633acea1ecac06"
+uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
+version = "0.25.120"
+
+    [deps.Distributions.extensions]
+    DistributionsChainRulesCoreExt = "ChainRulesCore"
+    DistributionsDensityInterfaceExt = "DensityInterface"
+    DistributionsTestExt = "Test"
+
+    [deps.Distributions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    DensityInterface = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
+    Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[[deps.DocStringExtensions]]
+git-tree-sha1 = "7442a5dfe1ebb773c29cc2962a8980f47221d76c"
+uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+version = "0.9.5"
+
+[[deps.FillArrays]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "6a70198746448456524cb442b8af316927ff3e1a"
+uuid = "1a297f60-69ca-5386-bcde-b61e274b549b"
+version = "1.13.0"
+weakdeps = ["PDMats", "SparseArrays", "Statistics"]
+
+    [deps.FillArrays.extensions]
+    FillArraysPDMatsExt = "PDMats"
+    FillArraysSparseArraysExt = "SparseArrays"
+    FillArraysStatisticsExt = "Statistics"
+
+[[deps.HypergeometricFunctions]]
+deps = ["LinearAlgebra", "OpenLibm_jll", "SpecialFunctions"]
+git-tree-sha1 = "68c173f4f449de5b438ee67ed0c9c748dc31a2ec"
+uuid = "34004b35-14d8-5ef3-9330-4cdb6864b03a"
+version = "0.3.28"
+
+[[deps.IrrationalConstants]]
+git-tree-sha1 = "e2222959fbc6c19554dc15174c81bf7bf3aa691c"
+uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
+version = "0.2.4"
+
+[[deps.JLLWrappers]]
+deps = ["Artifacts", "Preferences"]
+git-tree-sha1 = "0533e564aae234aff59ab625543145446d8b6ec2"
+uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
+version = "1.7.1"
+
+[[deps.Libdl]]
+uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+version = "1.11.0"
+
+[[deps.LinearAlgebra]]
+deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
+uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+version = "1.12.0"
+
+[[deps.LogExpFunctions]]
+deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
+git-tree-sha1 = "13ca9e2586b89836fd20cccf56e57e2b9ae7f38f"
+uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
+version = "0.3.29"
+
+    [deps.LogExpFunctions.extensions]
+    LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
+    LogExpFunctionsChangesOfVariablesExt = "ChangesOfVariables"
+    LogExpFunctionsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.LogExpFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    ChangesOfVariables = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
+
+[[deps.Missings]]
+deps = ["DataAPI"]
+git-tree-sha1 = "ec4f7fbeab05d7747bdf98eb74d130a2a2ed298d"
+uuid = "e1d29d7a-bbdc-5cf2-9ac0-f12de2c33e28"
+version = "1.2.0"
+
+[[deps.OpenBLAS_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
+uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+version = "0.3.29+0"
+
+[[deps.OpenLibm_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+version = "0.8.5+0"
+
+[[deps.OpenSpecFun_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "1346c9208249809840c91b26703912dff463d335"
+uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
+version = "0.5.6+0"
+
+[[deps.OrderedCollections]]
+git-tree-sha1 = "05868e21324cede2207c6f0f466b4bfef6d5e7ee"
+uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+version = "1.8.1"
+
+[[deps.PDMats]]
+deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
+git-tree-sha1 = "f07c06228a1c670ae4c87d1276b92c7c597fdda0"
+uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
+version = "0.11.35"
+
+[[deps.Preferences]]
+deps = ["TOML"]
+git-tree-sha1 = "0f27480397253da18fe2c12a4ba4eb9eb208bf3d"
+uuid = "21216c6a-2e73-6563-6e65-726566657250"
+version = "1.5.0"
+
+[[deps.Printf]]
+deps = ["Unicode"]
+uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.PtrArrays]]
+git-tree-sha1 = "1d36ef11a9aaf1e8b74dacc6a731dd1de8fd493d"
+uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
+version = "1.3.0"
+
+[[deps.QuadGK]]
+deps = ["DataStructures", "LinearAlgebra"]
+git-tree-sha1 = "9da16da70037ba9d701192e27befedefb91ec284"
+uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
+version = "2.11.2"
+
+    [deps.QuadGK.extensions]
+    QuadGKEnzymeExt = "Enzyme"
+
+    [deps.QuadGK.weakdeps]
+    Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+
+[[deps.Random]]
+deps = ["SHA"]
+uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+version = "1.11.0"
+
+[[deps.Reexport]]
+git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
+uuid = "189a3867-3050-52da-a836-e630ba90ab69"
+version = "1.2.2"
+
+[[deps.Rmath]]
+deps = ["Random", "Rmath_jll"]
+git-tree-sha1 = "852bd0f55565a9e973fcfee83a84413270224dc4"
+uuid = "79098fc4-a85e-5d69-aa6a-4863f24498fa"
+version = "0.8.0"
+
+[[deps.Rmath_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "58cdd8fb2201a6267e1db87ff148dd6c1dbd8ad8"
+uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
+version = "0.5.1+0"
+
+[[deps.SHA]]
+uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+version = "0.7.0"
+
+[[deps.Serialization]]
+uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+version = "1.11.0"
+
+[[deps.SortingAlgorithms]]
+deps = ["DataStructures"]
+git-tree-sha1 = "64d974c2e6fdf07f8155b5b2ca2ffa9069b608d9"
+uuid = "a2af1166-a08f-5f64-846c-94a0d3cef48c"
+version = "1.2.2"
+
+[[deps.SparseArrays]]
+deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
+uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+version = "1.12.0"
+
+[[deps.SpecialFunctions]]
+deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
+git-tree-sha1 = "41852b8679f78c8d8961eeadc8f62cef861a52e3"
+uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
+version = "2.5.1"
+
+    [deps.SpecialFunctions.extensions]
+    SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
+
+    [deps.SpecialFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+
+[[deps.Statistics]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "ae3bb1eb3bba077cd276bc5cfc337cc65c3075c0"
+uuid = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+version = "1.11.1"
+weakdeps = ["SparseArrays"]
+
+    [deps.Statistics.extensions]
+    SparseArraysExt = ["SparseArrays"]
+
+[[deps.StatsAPI]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "9d72a13a3f4dd3795a195ac5a44d7d6ff5f552ff"
+uuid = "82ae8749-77ed-4fe6-ae5f-f523153014b0"
+version = "1.7.1"
+
+[[deps.StatsBase]]
+deps = ["AliasTables", "DataAPI", "DataStructures", "LinearAlgebra", "LogExpFunctions", "Missings", "Printf", "Random", "SortingAlgorithms", "SparseArrays", "Statistics", "StatsAPI"]
+git-tree-sha1 = "2c962245732371acd51700dbb268af311bddd719"
+uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+version = "0.34.6"
+
+[[deps.StatsFuns]]
+deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
+git-tree-sha1 = "8e45cecc66f3b42633b8ce14d431e8e57a3e242e"
+uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
+version = "1.5.0"
+
+    [deps.StatsFuns.extensions]
+    StatsFunsChainRulesCoreExt = "ChainRulesCore"
+    StatsFunsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.StatsFuns.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
+
+[[deps.SuiteSparse]]
+deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
+uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
+
+[[deps.SuiteSparse_jll]]
+deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
+uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
+version = "7.8.3+2"
+
+[[deps.TOML]]
+deps = ["Dates"]
+uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.3"
+
+[[deps.Unicode]]
+uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+version = "1.11.0"
+
+[[deps.libblastrampoline_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+version = "5.13.1+0"
+"""
+
+# ╔═╡ Cell order:
+# ╠═99182048-9fc2-11f0-100a-b737aac5eecc
+# ╠═699493f0-b13c-4bfa-a0ac-78b5d49c157e
+# ╠═9ca89948-4a93-4247-8a6d-0becfc666ef6
+# ╠═a0a07434-d36d-4a2a-bfe5-814d219c34b7
+# ╠═46f6fe97-ea95-49aa-b301-f49b91d9ad77
+# ╠═783f9eca-dbf9-46ea-9be0-1e1197d52a52
+# ╠═9eb140a7-cd59-4efa-81af-b6fadb9008ad
+# ╠═8e34a3da-40bc-4313-acae-e43d942d2fd8
+# ╠═d3d2c187-f58f-4875-adad-49b5cc5e92fb
+# ╠═a836dd88-9945-49bd-a25e-c6322b115192
+# ╠═f59c70fb-dd81-40f4-8652-f81503994467
+# ╠═3383286c-1b10-4f23-9f3e-006f336b64f6
+# ╠═d9cf691d-7aa0-4144-8e91-6b2347b1f9ea
+# ╠═52b56cdf-91c1-431c-96cc-42d46e5ece2a
+# ╠═df36bb5e-563e-44cc-8eb3-f59ac19168b6
+# ╠═c6612ac1-225e-4738-89b8-a47096a1165a
+# ╠═77a2304b-ceb1-4677-801b-abfb68444f1b
+# ╠═44fc9661-54a4-4785-b891-7e2a42f6a552
+# ╠═944cc85a-ac26-433b-b9d6-600a1ffeca4d
+# ╠═432594f2-e8bb-4225-9c08-14a27b7b4678
+# ╠═cd15e79d-2c0e-4f92-9f96-f4d8c38e27a9
+# ╠═91d3f260-22f5-443e-afb4-bae3efd8fb68
+# ╠═bbaedb5c-c598-42f7-b447-45c35efb0fb1
+# ╠═15e1a90f-a9a4-427c-9173-0410c93c8dbc
+# ╠═e0f3a725-9c01-4a1d-afe4-a86a35a1d567
+# ╟─00000000-0000-0000-0000-000000000001
+# ╟─00000000-0000-0000-0000-000000000002
